@@ -1,0 +1,2 @@
+# downloads_sorter.py uses only the Python standard library.
+# Python 3.8 or newer is required. There are no third-party packages to install.
