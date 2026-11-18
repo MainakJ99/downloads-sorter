@@ -9,8 +9,8 @@ Safety rules (folders are never broken apart):
   * Only loose files are sorted. Any folder you created or extracted (games,
     projects, unzipped archives, ...) is left completely untouched.
   * --recursive only re-sorts inside the sorter's OWN folders (Images, Documents,
-    ..., Other, and date folders such as 2026-11). Any other subfolder inside
-    them is treated as a unit and skipped.
+    ..., Code, Code/Reading, Other, and date folders such as 2026-11). Any other
+    subfolder inside them is treated as a unit and skipped.
   * Hidden/system files (desktop.ini, Thumbs.db, .DS_Store, ...) are never moved.
   * Files still downloading (.crdownload, .part, or a placeholder next to one)
     are skipped.
@@ -48,11 +48,18 @@ CATEGORIES = {
     "Audio": {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"},
     "Archives": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz"},
     "Installers": {".exe", ".msi", ".dmg", ".pkg", ".deb", ".rpm", ".appimage", ".apk"},
-    "Code": {".py", ".js", ".ts", ".html", ".css", ".json", ".xml", ".java", ".c", ".cpp",
-             ".h", ".go", ".rs", ".sh", ".yaml", ".yml", ".sql", ".ipynb"},
+    "Code": {".py", ".js", ".ts", ".css", ".json", ".xml", ".java", ".c", ".cpp",
+             ".h", ".go", ".rs", ".r", ".rmd", ".sh", ".yaml", ".yml", ".sql", ".ipynb"},
 }
 OTHER = "Other"
 MANAGED_CATEGORIES = set(CATEGORIES) | {OTHER}
+
+# HTML pages are reading material, so they go in Code/Reading rather than next to source files.
+READING_DIR = "Reading"
+NESTED_CATEGORIES = {
+    ".html": ("Code", READING_DIR),
+    ".htm": ("Code", READING_DIR),
+}
 
 # Browsers use these while a download is still in progress - never touch them.
 PARTIAL_EXTENSIONS = {".crdownload", ".part", ".partial", ".tmp", ".download", ".opdownload"}
@@ -75,10 +82,18 @@ def log(message, quiet=False):
 
 def get_category(filename):
     """Return the category folder name for a file based on its extension."""
+    return category_parts(filename)[0]
+
+
+def category_parts(filename):
+    """Folders under the source for this file, before any date folders."""
     ext = os.path.splitext(filename)[1].lower()
+    nested = NESTED_CATEGORIES.get(ext)
+    if nested:
+        return list(nested)
     if not ext:
-        return OTHER
-    return EXT_TO_CATEGORY.get(ext, OTHER)
+        return [OTHER]
+    return [EXT_TO_CATEGORY.get(ext, OTHER)]
 
 
 def get_file_date(path, date_source):
@@ -121,9 +136,11 @@ def matches_date_format(rel_parts, date_format):
 def is_managed_dir(source, dirpath, date_format):
     """
     Is this one of the sorter's own folders (safe to re-sort and clean up)?
-      <source>/<Category>                  e.g. Documents
-      <source>/<Category>/<date parts>     e.g. Documents/2026-11
-      <source>/<date parts>                e.g. 2026-11
+      <source>/<Category>                       e.g. Documents
+      <source>/<Category>/<date parts>          e.g. Documents/2026-11
+      <source>/Code/Reading                     HTML reading material
+      <source>/Code/Reading/<date parts>        e.g. Code/Reading/2026-11
+      <source>/<date parts>                     e.g. 2026-11
     Anything else - a game, a project, an extracted archive, or a folder you made
     inside a category folder - is not managed and is never entered.
     """
@@ -133,9 +150,12 @@ def is_managed_dir(source, dirpath, date_format):
     parts = rel.split(os.sep)
     if any(p.startswith(".") for p in parts):
         return False
-    if parts[0] in MANAGED_CATEGORIES:
-        return len(parts) == 1 or matches_date_format(parts[1:], date_format)
-    return matches_date_format(parts, date_format)
+    if parts[0] not in MANAGED_CATEGORIES:
+        return matches_date_format(parts, date_format)
+    rest = parts[1:]
+    if rest and parts[0] == "Code" and rest[0] == READING_DIR:
+        rest = rest[1:]
+    return not rest or matches_date_format(rest, date_format)
 
 
 def is_hidden_or_system(path, filename):
@@ -176,7 +196,7 @@ def should_skip(path, filename, settle_seconds, protected):
 def build_target_dir(source, path, filename, mode, date_format, date_source):
     parts = []
     if mode in ("ext", "both"):
-        parts.append(get_category(filename))
+        parts.extend(category_parts(filename))
     if mode in ("date", "both"):
         parts.append(get_file_date(path, date_source).strftime(date_format))
     return os.path.join(source, *parts)

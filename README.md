@@ -1,13 +1,13 @@
 # Downloads Sorter
 
-A small Python script that sorts loose files in your Downloads folder into subfolders by file type, by date, or both. It can run once, or stay running and pick up new downloads as they appear.
+A small Python script that sorts loose files in your Downloads folder into subfolders by file type, by date, or both. It can run once, or stay running and pick up new downloads as they appear. Every real run is logged, so it can be undone.
 
-Only files sitting directly in the folder you point it at are moved. Folders you already have — games, projects, unzipped archives — are left alone.
+Only files sitting directly in the folder you point it at are moved. Folders you already have (games, projects, unzipped archives) are left alone.
 
 ## Requirements
 
-- Python 3.8 or newer
-- No third-party packages. `requirements.txt` is empty on purpose.
+- Python 3.6 or newer (the script uses f-strings)
+- No third-party packages. It only uses the standard library: `argparse`, `os`, `shutil`, `errno`, `json`, `stat`, `sys`, `time` and `datetime`.
 
 ```bash
 python downloads_sorter.py --help
@@ -33,6 +33,12 @@ Sort a different folder:
 python downloads_sorter.py --source "D:\Incoming"
 ```
 
+Changed your mind? Put everything back:
+
+```bash
+python downloads_sorter.py --undo
+```
+
 ## What it does
 
 | Mode | Flag | Result |
@@ -41,9 +47,9 @@ python downloads_sorter.py --source "D:\Incoming"
 | By date | `-m date` | `Downloads/2026-11/report.pdf` |
 | Both | `-m both` | `Downloads/Documents/2026-11/report.pdf` |
 
-Date folders use the file's creation time (`--date-source created`). On Linux, creation time is not available, so the script uses the modification time instead. Pass `--date-source modified` to always use the last-modified time.
+Date folders use the file's creation time (`--date-source created`). Windows with Python 3.12 or newer, and macOS, report a true creation time. Older Python on Windows uses the Windows creation time as well. Linux does not provide a creation time, so the script uses the modification time instead. Pass `--date-source modified` to always use the last-modified time.
 
-Change the folder name format with `--date-format`. The default is `%Y-%m` (`2026-11`). `%Y/%m` makes `2026/11`.
+Change the folder name format with `--date-format`. The default is `%Y-%m` (`2026-11`). `%Y/%m` makes `2026/11`. An invalid format is rejected before anything runs.
 
 Unknown extensions, and files with no extension, go into `Other`.
 
@@ -59,27 +65,42 @@ Unknown extensions, and files with no extension, go into `Other`.
 | Audio | mp3, wav, flac, aac, ogg, m4a, wma |
 | Archives | zip, rar, 7z, tar, gz, bz2, xz, tgz |
 | Installers | exe, msi, dmg, pkg, deb, rpm, appimage, apk |
-| Code | py, js, ts, html, css, json, xml, java, c, cpp, h, go, rs, sh, yaml, yml, sql, ipynb |
+| Code | py, js, ts, css, json, xml, java, c, cpp, h, go, rs, r, rmd, sh, yaml, yml, sql, ipynb |
+| Code/Reading | html, htm |
 | Other | everything else |
+
+HTML and HTM files are reading material, so they go in `Code/Reading` instead of next to source files in `Code`. With `-m both` they go in `Code/Reading/2026-11`.
+
+To add or change categories, edit the `CATEGORIES` dictionary at the top of `downloads_sorter.py`.
 
 ## Safety
 
-- Folders are never entered or rearranged. A game folder, a project, or an extracted zip stays as it is.
-- `--recursive` only looks inside folders this script created (`Images`, `Documents`, `Other`, date folders such as `2026-11`, and the same date folders nested under a category). Any other subfolder is skipped.
-- Hidden and system files (`desktop.ini`, `Thumbs.db`, `.DS_Store`, dotfiles) are never moved.
-- In-progress downloads are skipped: `.crdownload`, `.part`, `.partial`, `.tmp`, `.download`, `.opdownload`, and a finished-looking file that still has one of those companions next to it.
+- **Folders are never entered or rearranged.** A game folder, a project, or an extracted zip stays as it is.
+- **`--recursive` only looks inside the sorter's own folders:** the category folders (`Images`, `Documents`, ..., `Code`, `Other`), `Code/Reading`, date folders such as `2026-11`, and date folders nested under a category or under `Code/Reading`. Any other subfolder, even one inside a category folder, is treated as a unit and skipped.
+- **Folders are recognized by name.** A folder you created yourself that is called `Documents`, `Images`, `Other`, or that matches the date format (for example `2026-11`), is treated as the sorter's own and can be re-sorted with `--recursive`. Pick other names for your own folders inside the source.
+- Hidden and system files are never moved: dotfiles, `desktop.ini`, `Thumbs.db`, `ehthumbs.db`, `.DS_Store`, `.localized`, and anything with the Windows Hidden or System attribute. Hidden folders (such as `.sorter_logs`) and symlinks are never touched.
+- In-progress downloads are skipped: `.crdownload`, `.part`, `.partial`, `.tmp`, `.download`, `.opdownload`, and a finished-looking file that still has one of those companions next to it (for example `file.pdf` next to `file.pdf.part`).
 - Files modified in the last 3 seconds are skipped, so a download that is still being written is not moved. Change that window with `--settle`.
-- Existing files are never overwritten. A name clash becomes `report (1).pdf`, then `report (2).pdf`.
-- If a file is locked (open in another app, or held by a torrent client), that file is skipped and no copy is left behind.
+- Existing files are never overwritten. A name clash becomes `report (1).pdf`, then `report (2).pdf`. This also holds if a clashing file appears while the script is running.
+- A file that is already in the folder it belongs in is left where it is, so repeated runs are safe.
+- If a file is locked (open in another app, or held by a torrent client), that file is skipped with a "Could not move" message, no copy is left behind, and the script continues with the next file.
 - The script itself is never moved, even if it lives in the folder being sorted.
 - A real run writes a move log under `<source>/.sorter_logs/`. Dry runs write nothing.
 
 ## Undo
 
-Every move is recorded. Put the last run back:
+Every move is recorded in a log named like `sort-20261118-221500.jsonl`. The log is created when the first file is moved, so a run that moves nothing leaves no log. In watch mode, one log covers the whole session, from start to Ctrl+C.
+
+Put the last run back:
 
 ```bash
 python downloads_sorter.py --undo
+```
+
+Undo looks for logs in the default `~/Downloads`. For another folder, pass `--source`:
+
+```bash
+python downloads_sorter.py --source "D:\Incoming" --undo
 ```
 
 Undo a specific log, or preview the restore:
@@ -89,7 +110,9 @@ python downloads_sorter.py --undo "C:\Users\you\Downloads\.sorter_logs\sort-2026
 python downloads_sorter.py --undo --dry-run
 ```
 
-Undo moves files back to their original paths, removes category folders that are empty afterward, and renames the log to `*.jsonl.undone`. A file is skipped if it is no longer at the sorted location, or if something already occupies the original path.
+Undo moves files back to their original paths, removes the sorter's own folders that are empty afterward, and renames the log to `*.jsonl.undone`. Because used logs are renamed, running `--undo` again goes back one run further. A file is skipped if it is no longer at the sorted location, or if something already occupies the original path.
+
+`--undo` cannot be combined with `--watch` or `--recursive`.
 
 ## Re-organize an already sorted folder
 
@@ -100,7 +123,9 @@ python downloads_sorter.py -m both --recursive --remove-empty --dry-run
 python downloads_sorter.py -m both --recursive --remove-empty
 ```
 
-`--remove-empty` only deletes folders this script owns, and only when they are empty.
+`--remove-empty` only deletes the sorter's own folders (see [Safety](#safety)), and only when they are empty. It does nothing in a dry run.
+
+If you used a custom `--date-format` before, pass the same one again. Date folders in a different format are not recognized as the sorter's own, so they are not re-sorted or cleaned up.
 
 ## Watch mode
 
@@ -111,7 +136,7 @@ python downloads_sorter.py --watch
 python downloads_sorter.py --watch --interval 10
 ```
 
-Stop with Ctrl+C. `--dry-run` cannot be combined with `--watch`.
+Stop with Ctrl+C. The script polls, so a new file can wait up to one interval, plus the settle time, before it is moved. `--dry-run` cannot be combined with `--watch`.
 
 ## Options
 
@@ -121,14 +146,19 @@ Stop with Ctrl+C. `--dry-run` cannot be combined with `--watch`.
 | `-m`, `--mode` | `ext` | `ext`, `date`, or `both` |
 | `--date-format` | `%Y-%m` | `strftime` pattern for date folders |
 | `--date-source` | `created` | `created` or `modified` |
-| `-r`, `--recursive` | off | Re-sort files already inside this script's folders |
-| `--remove-empty` | off | Delete this script's folders once they are empty |
+| `-r`, `--recursive` | off | Re-sort files already inside the sorter's own folders |
+| `--remove-empty` | off | Delete the sorter's own folders once they are empty |
 | `-w`, `--watch` | off | Keep running and sort new files |
-| `-i`, `--interval` | `5` | Seconds between checks in watch mode |
-| `--settle` | `3` | Skip files modified more recently than this |
+| `-i`, `--interval` | `5` | Seconds between checks in watch mode (must be above 0) |
+| `--settle` | `3` | Skip files modified more recently than this many seconds (cannot be negative) |
 | `-n`, `--dry-run` | off | Print the plan and move nothing |
-| `-q`, `--quiet` | off | Errors and the final summary only |
+| `-q`, `--quiet` | off | Hide the per-file "Moved" lines. The start line, errors, dry-run lines and the final summary still print |
 | `--undo [LOG]` | | Restore the latest run, or the run in `LOG` |
+
+## Known limitations
+
+- On Linux and macOS the move is done by creating a hard link and then removing the original, which guarantees nothing is overwritten. Drives that may not support hard links (FAT32 or exFAT USB drives, some network shares) can fail on every file with "Could not move". Run with `--dry-run`, then a real run on a few files, before trusting a new drive.
+- Date folders come from the file's timestamp when it is moved, not from when it was downloaded, so copied or restored files can land in an older month.
 
 ## Examples
 
